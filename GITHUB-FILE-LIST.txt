@@ -1,0 +1,51 @@
+TredIN production repository manifest
+
+ROOT
+- package.json
+- .gitignore
+- README.md
+- DEPLOY-CHECKLIST.md
+- DEPLOYMENT-RUNBOOK.md
+- GITHUB-FILE-LIST.txt
+- render.yaml
+
+USER
+- apps/user/package.json
+- apps/user/tsconfig.json
+- apps/user/index.html
+- apps/user/style.css
+- apps/user/config.js
+- apps/user/src/main.ts
+- apps/user/dist/main.js
+
+ADMIN
+- apps/admin/package.json
+- apps/admin/tsconfig.json
+- apps/admin/index.html
+- apps/admin/style.css
+- apps/admin/config.js
+- apps/admin/src/main.ts
+- apps/admin/dist/main.js
+
+BACKEND
+- backend/package.json
+- backend/.env.example
+- backend/src/server.js
+- backend/src/init-db.js
+- backend/src/seed-instruments.js
+- backend/src/provision-admin.js
+- backend/src/execution-engine.cjs
+- backend/src/broker-engine.cjs
+- backend/sql/schema.sql
+- backend/sql/portfolio.sql
+- backend/sql/support_notifications.sql
+- backend/sql/admin_controls.sql
+
+TOOLS
+- scripts/deployment-preflight.js
+
+DO NOT COMMIT
+- node_modules/
+- .env files containing real secrets
+- local credentials
+- runtime logs

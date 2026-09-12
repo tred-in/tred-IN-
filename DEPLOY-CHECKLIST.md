@@ -1,0 +1,24 @@
+# Final Deployment Checklist
+
+- [ ] GitHub root contains `apps/user`, `apps/admin`, `backend`, `render.yaml`.
+- [ ] Render Blueprint created.
+- [ ] Backend `/health` returns HTTP 200.
+- [ ] Postgres initialized and instruments seeded.
+- [ ] Strong `JWT_SECRET` set.
+- [ ] Strong `ADMIN_PASSWORD` (14+ chars) set.
+- [ ] `CORS_ORIGIN` contains exact user + admin origins.
+- [ ] User `TREDIN_API` points to backend.
+- [ ] Admin `TREDIN_API` points to backend.
+- [ ] User login tested.
+- [ ] Admin login tested.
+- [ ] Order → RMS → history tested.
+- [ ] Positions/portfolio tested.
+- [ ] Deposit/withdraw request tested.
+- [ ] KYC upload/submission tested.
+- [ ] Admin KYC approval/rejection tested.
+- [ ] Finance approval/rejection tested.
+- [ ] Support tested.
+- [ ] Audit log tested.
+- [ ] Reconciliation tested.
+- [ ] Mobile viewport checked.
+- [ ] No production execution enabled until broker/venue integration is verified.

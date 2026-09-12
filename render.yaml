@@ -1,0 +1,84 @@
+services:
+  - type: web
+    name: tredin-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node src/init-db.js && node src/seed-instruments.js && node src/provision-admin.js && node src/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tredin-db
+          property: connectionString
+      - key: MARKET_ADAPTER_HOSTPORT
+        fromService:
+          type: pserv
+          name: tredin-market-live
+          property: hostport
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_ISSUER
+        value: tredin
+      - key: CORS_ORIGIN
+        sync: false
+      - key: ADMIN_USER_ID
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ORDER_EXECUTION_ENABLED
+        value: "false"
+      - key: TREDIN_SYMBOL_MAP
+        value: '[{"id":"NSE:RELIANCE","symbol":"RELIANCE","name":"Reliance Industries","exchange":"NSE","segment":"equity","truedataSymbol":"RELIANCE"},{"id":"NSE:TCS","symbol":"TCS","name":"Tata Consultancy Services","exchange":"NSE","segment":"equity","truedataSymbol":"TCS"},{"id":"NSE:INFY","symbol":"INFY","name":"Infosys","exchange":"NSE","segment":"equity","truedataSymbol":"INFY"},{"id":"NSE:SBIN","symbol":"SBIN","name":"State Bank of India","exchange":"NSE","segment":"equity","truedataSymbol":"SBIN"},{"id":"NSE:NIFTY-I","symbol":"NIFTY","name":"NIFTY Index Future","exchange":"NSE","segment":"futures","truedataSymbol":"NIFTY-I"},{"id":"NSE:BANKNIFTY-I","symbol":"BANKNIFTY","name":"BANKNIFTY Future","exchange":"NSE","segment":"futures","truedataSymbol":"BANKNIFTY-I"},{"id":"MCX:GOLD-I","symbol":"GOLD","name":"Gold Futures","exchange":"MCX","segment":"commodity","truedataSymbol":"GOLD-I"},{"id":"MCX:CRUDEOIL-I","symbol":"CRUDEOIL","name":"Crude Oil Futures","exchange":"MCX","segment":"commodity","truedataSymbol":"CRUDEOIL-I"},{"id":"NSE:USDINR-I","symbol":"USDINR","name":"US Dollar / INR","exchange":"NSE","segment":"forex","truedataSymbol":"USDINR-I"},{"id":"NSE:EURINR-I","symbol":"EURINR","name":"Euro / INR","exchange":"NSE","segment":"forex","truedataSymbol":"EURINR-I"}]'
+
+  - type: pserv
+    name: tredin-market-live
+    runtime: node
+    plan: starter
+    rootDir: backend/market-adapter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TREDIN_SYMBOL_MAP
+        sync: false
+      - key: TRUEDATA_WS_URL
+        value: wss://push.truedata.in:8086
+      - key: TRUEDATA_REALTIME_PORT
+        value: "8086"
+      - key: TRUEDATA_USER
+        sync: false
+      - key: TRUEDATA_PASSWORD
+        sync: false
+
+  - type: web
+    name: tredin-user
+    runtime: static
+    plan: free
+    rootDir: apps/user
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: TREDIN_API
+        sync: false
+  - type: web
+    name: tredin-admin
+    runtime: static
+    plan: free
+    rootDir: apps/admin
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: TREDIN_API
+        sync: false
+
+databases:
+  - name: tredin-db
+    plan: free
