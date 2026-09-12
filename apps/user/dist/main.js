@@ -1,0 +1,228 @@
+"use strict";
+const cfg = window.TREDIN_CONFIG;
+const API = (localStorage.getItem('TREDIN_API') || cfg?.api || '').replace(/\/$/, '');
+const demo = { user: { userId: 'DEMO001', name: 'Demo Trader', role: 'CUSTOMER', status: 'ACTIVE', email: 'demo@tredin.local' }, funds: { balance: 125000, pendingDeposit: 0, pendingWithdrawal: 0 }, orders: [], positions: [{ symbol: 'TREDIN DEMO', quantity: 10, average_price: 1250, unrealized_pnl: 850 }], notifications: [] };
+let token = localStorage.getItem('tredin_access') || '';
+let refreshToken = localStorage.getItem('tredin_refresh') || '';
+let user = JSON.parse(localStorage.getItem('tredin_user') || 'null');
+let tab = 'overview';
+let quotes = [];
+let tickets = [];
+let activeTicket = null;
+let stream = null;
+let statusMsg = '';
+const app = document.querySelector('#app');
+async function refreshAccess() { if (!API || !refreshToken)
+    throw Error('SESSION_EXPIRED'); const r = await fetch(API + '/auth/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }) }); const d = await r.json(); if (!r.ok)
+    throw Error(d.error || 'SESSION_EXPIRED'); token = d.accessToken || d.token; refreshToken = d.refreshToken || refreshToken; localStorage.setItem('tredin_access', token); localStorage.setItem('tredin_refresh', refreshToken); if (d.user) {
+    user = d.user;
+    localStorage.setItem('tredin_user', JSON.stringify(user));
+} return d; }
+async function api(path, opts = {}, retry = true) { if (!API)
+    throw Error('DEMO'); const h = new Headers(opts.headers); if (!(opts.body instanceof FormData))
+    h.set('Content-Type', 'application/json'); if (token)
+    h.set('Authorization', `Bearer ${token}`); const r = await fetch(API + path, { ...opts, headers: h }); const text = await r.text(); let d = {}; try {
+    d = text ? JSON.parse(text) : {};
+}
+catch { } if (r.status === 401 && retry && refreshToken && path !== '/auth/refresh') {
+    await refreshAccess();
+    return api(path, opts, false);
+} if (!r.ok)
+    throw Error(d.error || 'REQUEST_FAILED'); return d; }
+function esc(v) { return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
+function login() { app.innerHTML = `<div class="login"><div class="loginBox"><div class="brand"><span class="brandMark">T</span><span>TRED<span class="gold">IN</span></span></div><div class="eyebrow">Trading workspace</div><h1>Secure access</h1><p class="muted">Production API or instant demo mode.</p><form class="form" id="login"><input class="input" name="id" placeholder="User ID / email / mobile" value="DEMO001"><input class="input" name="pw" placeholder="Password" type="password" value="demo"><button class="btn primary">Enter workspace</button></form><button class="btn" id="showSignup">Create account</button><div class="note">${statusMsg || 'Demo mode is enabled when no API URL is configured.'}</div></div></div>`; document.querySelector('#login').addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); try {
+    const d = await api('/auth/login', { method: 'POST', body: JSON.stringify({ identifier: f.get('id'), password: f.get('pw') }) });
+    token = d.accessToken || d.token;
+    refreshToken = d.refreshToken || '';
+    user = d.user;
+    localStorage.setItem('tredin_access', token);
+    localStorage.setItem('tredin_refresh', refreshToken);
+    localStorage.setItem('tredin_user', JSON.stringify(user));
+    statusMsg = '';
+    render();
+}
+catch (e) {
+    if (API) {
+        statusMsg = `Login failed: ${e.message}`;
+        render();
+        return;
+    }
+    user = demo.user;
+    render();
+} }); document.querySelector('#showSignup')?.addEventListener('click', signup); }
+function signup() { app.innerHTML = `<div class="login"><div class="loginBox"><div class="brand"><span class="brandMark">T</span><span>TRED<span class="gold">IN</span></span></div><h1>Create account</h1><form id="signup" class="form"><input class="input" name="name" placeholder="Full name" required><input class="input" name="mobile" placeholder="10-digit mobile" required><input class="input" name="email" type="email" placeholder="Email" required><input class="input" name="password" type="password" minlength="8" placeholder="Password (8+ chars)" required><button class="btn primary">Create account</button><button type="button" class="btn" id="backLogin">Back to login</button></form><div class="note">${esc(statusMsg)}</div></div></div>`; document.querySelector('#backLogin')?.addEventListener('click', login); document.querySelector('#signup')?.addEventListener('submit', async (e) => { e.preventDefault(); if (!API) {
+    statusMsg = 'Signup requires the backend. Configure TREDIN_API.';
+    return signup();
+} const f = new FormData(e.currentTarget); try {
+    await api('/auth/register', { method: 'POST', body: JSON.stringify({ name: f.get('name'), mobile: f.get('mobile'), email: f.get('email'), password: f.get('password') }) });
+    statusMsg = 'Account created. Please log in.';
+    login();
+}
+catch (e) {
+    statusMsg = `Signup failed: ${e.message}`;
+    signup();
+} }); }
+async function load() { if (!API)
+    return; const [me, f, o, p, n, k, t] = await Promise.all([api('/me'), api('/funds'), api('/orders'), api('/positions'), api('/notifications'), api('/kyc'), api('/support')]); user = { ...user, ...me.user }; demo.funds = f.funds; demo.orders = o.orders; demo.positions = p.positions; demo.notifications = n.notifications; demo.kyc = k.kyc; tickets = t.tickets || []; localStorage.setItem('tredin_user', JSON.stringify(user)); }
+function nav() { const items = [['overview', 'Overview'], ['market', 'Market'], ['orders', 'Orders'], ['positions', 'Positions'], ['funds', 'Funds'], ['kyc', 'KYC'], ['support', 'Support'], ['notifications', 'Notifications'], ['profile', 'Profile']]; return items.map(([id, label]) => `<button class="${tab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join(''); }
+function layout(content) { app.innerHTML = `<div class="shell"><header class="top"><div class="brand"><span class="brandMark">T</span><span>TRED<span class="gold">IN</span></span></div><div class="toolbar"><span class="pill">${esc(user?.role || 'CUSTOMER')}</span><button class="btn small" id="logout">Logout</button></div></header><div class="layout"><aside><div class="nav">${nav()}</div></aside><main>${content}</main></div><div class="mobileNav">${nav()}</div></div>`; document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; render(); })); document.querySelector('#logout')?.addEventListener('click', async () => { try {
+    if (API && token)
+        await api('/auth/logout', { method: 'POST' });
+}
+catch { } token = ''; user = null; localStorage.removeItem('tredin_access'); localStorage.removeItem('tredin_refresh'); localStorage.removeItem('tredin_user'); login(); }); }
+function overview() { const bal = demo.funds.balance; return `<div class="hero"><div><div class="eyebrow">Personal trading cockpit</div><div class="h1">Good to see you, ${esc(user?.name || 'Trader')}</div><div class="muted">One workspace for market, orders, positions, funds and compliance.</div></div><button class="btn primary" data-tab="market">Open Market</button></div><div class="grid g4"><div class="card stat"><div class="label">Available funds</div><div class="value">₹${bal.toLocaleString('en-IN')}</div></div><div class="card stat"><div class="label">Open positions</div><div class="value">${demo.positions.length}</div></div><div class="card stat"><div class="label">Today P&L</div><div class="value positive">+₹${demo.positions.reduce((s, p) => s + Number(p.unrealized_pnl || 0), 0).toLocaleString('en-IN')}</div></div><div class="card stat"><div class="label">KYC</div><div class="value">${esc(demo.kyc?.status || 'Pending')}</div></div></div><div class="grid g2" style="margin-top:14px"><div class="card"><div class="eyebrow">Portfolio pulse</div><div class="chart">${Array.from({ length: 32 }, (_, i) => `<div class="bar" style="height:${25 + ((i * 37) % 70)}%"></div>`).join('')}</div></div><div class="card"><div class="eyebrow">Quick actions</div><div class="grid" style="margin-top:12px"><button class="btn" data-tab="orders">Place / review orders</button><button class="btn" data-tab="funds">Deposit or withdraw</button><button class="btn" data-tab="kyc">Complete KYC</button><button class="btn" data-tab="support">Open support ticket</button></div></div></div>`; }
+function market() { const list = quotes.length ? quotes.map(q => ({ symbol: q.symbol, exchange: q.exchange, ltp: Number(q.ltp), change: Number.isFinite(Number(q.change)) ? Number(q.change) : (Number.isFinite(Number(q.prevClose)) && Number(q.prevClose) !== 0 ? ((Number(q.ltp) - Number(q.prevClose)) / Number(q.prevClose)) * 100 : 0) })) : (API ? [] : ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK', 'SBIN'].map((symbol, i) => ({ symbol, exchange: 'NSE', ltp: 1200 + i * 137.35, change: .4 + i * .22 }))); return `<div class="hero"><div><div class="eyebrow">${API ? (quotes.length ? 'TrueData live feed' : 'Live market feed — connecting…') : 'Demo market'}</div><div class="h1">Watchlist & order entry</div></div></div><div class="grid g3">${list.map(q => `<div class="card"><div style="display:flex;justify-content:space-between"><b>${esc(q.symbol)}</b><span class="pill">${esc(q.exchange)}</span></div><div class="value" style="font-size:24px;margin-top:16px">₹${q.ltp.toFixed(2)}</div><div class="${q.change >= 0 ? 'positive' : 'negative'}" style="margin-top:6px">${q.change >= 0 ? '+' : ''}${q.change.toFixed(2)}%</div><button class="btn primary" style="width:100%;margin-top:14px" data-buy="${esc(q.exchange + ':' + q.symbol)}">Buy</button></div>`).join('')}</div><div class="card" style="margin-top:14px"><div class="eyebrow">Order ticket</div><form id="orderForm" class="grid g3" style="margin-top:12px"><input class="input" name="symbol" placeholder="Instrument ID (e.g. NSE:RELIANCE)" value="NSE:RELIANCE"><select class="select" name="side"><option>BUY</option><option>SELL</option></select><select class="select" name="type"><option>MARKET</option><option>LIMIT</option><option>SL</option><option>SL-M</option></select><input class="input" name="qty" type="number" min="1" value="1"><input class="input" name="price" type="number" step="0.01" placeholder="Limit price"><button class="btn primary">Submit order</button></form><div class="note" style="margin-top:12px">${API ? 'Orders are sent to the protected backend RMS.' : 'Demo mode only; no real order is submitted.'}</div></div>`; }
+async function loadQuotes() { try {
+    const d = await api('/market/quotes');
+    quotes = Array.isArray(d.quotes) ? d.quotes : [];
+}
+catch {
+    quotes = [];
+} }
+function orders() { return `<div class="hero"><div><div class="eyebrow">Execution</div><div class="h1">Orders</div></div><button class="btn primary" data-tab="market">New order</button></div><div class="card"><div class="tableWrap"><table class="table"><thead><tr><th>Time</th><th>Instrument</th><th>Side</th><th>Type</th><th>Qty</th><th>Status</th><th></th></tr></thead><tbody>${demo.orders.length ? demo.orders.map(o => `<tr><td>${esc(o.created_at || 'Now')}</td><td>${esc(o.symbol || o.instrument_id)}</td><td>${esc(o.side)}</td><td>${esc(o.order_type)}</td><td>${esc(o.quantity)}</td><td><span class="pill">${esc(o.status)}</span></td><td>${['FILLED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(o.status) ? '' : `<button class="btn small danger" data-cancel="${esc(o.id)}">Cancel</button>`}</td></tr>`).join('') : `<tr><td colspan="7" class="muted">No orders yet.</td></tr>`}</tbody></table></div></div>`; }
+function positions() { return `<div class="hero"><div><div class="eyebrow">Portfolio</div><div class="h1">Positions</div></div></div><div class="card"><div class="tableWrap"><table class="table"><thead><tr><th>Symbol</th><th>Qty</th><th>Avg price</th><th>Unrealized P&L</th></tr></thead><tbody>${demo.positions.map(p => `<tr><td>${esc(p.symbol)}</td><td>${esc(p.quantity)}</td><td>₹${Number(p.average_price || 0).toFixed(2)}</td><td class="${Number(p.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}">₹${Number(p.unrealized_pnl || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></div></div>`; }
+function funds() { return `<div class="hero"><div><div class="eyebrow">Money movement</div><div class="h1">Funds & ledger</div></div></div><div class="grid g3"><div class="card stat"><div class="label">Available balance</div><div class="value">₹${demo.funds.balance.toLocaleString('en-IN')}</div></div><div class="card stat"><div class="label">Pending deposits</div><div class="value">₹${Number(demo.funds.pendingDeposit).toLocaleString('en-IN')}</div></div><div class="card stat"><div class="label">Pending withdrawals</div><div class="value">₹${Number(demo.funds.pendingWithdrawal).toLocaleString('en-IN')}</div></div></div><div class="card" style="margin-top:14px"><form id="fundForm" class="grid g3"><select class="select" name="type"><option>deposit</option><option>withdraw</option></select><input class="input" name="amount" type="number" min="1" placeholder="Amount"><button class="btn primary">Create request</button></form><div class="note" style="margin-top:12px">Requests do not directly mutate the balance in live mode; Finance/Admin approval posts the ledger entry.</div></div>`; }
+function kyc() { const k = demo.kyc; return `<div class="hero"><div><div class="eyebrow">Compliance</div><div class="h1">KYC</div><div class="muted">Upload PDF/JPEG/PNG documents and track review status.</div></div></div><div class="card"><div class="grid g3"><div><div class="muted">Status</div><h2>${esc(k?.status || 'NOT_STARTED')}</h2></div><div><div class="muted">Case</div><h2>${esc(k?.id || '—')}</h2></div><div><div class="muted">Documents</div><h2>${k?.documents?.length || 0}</h2></div></div><form id="kycForm" class="form" enctype="multipart/form-data"><select class="select" name="documentType"><option>PAN</option><option>PHOTO</option><option>ADDRESS</option><option>BANK_PROOF</option><option>SIGNATURE</option></select><input class="input" name="file" type="file" accept=".pdf,.jpg,.jpeg,.png" required><button class="btn">Upload document</button></form><form id="kycSubmit" class="form"><button class="btn primary">Submit KYC for review</button></form><div class="note">${esc(statusMsg)}</div></div>`; }
+function support() { return `<div class="hero"><div><div class="eyebrow">Helpdesk</div><div class="h1">Support</div></div></div><div class="grid g2"><div class="card"><form id="supportForm" class="form"><input class="input" name="subject" maxlength="200" placeholder="Subject" required><textarea class="input" name="message" maxlength="10000" rows="5" placeholder="Describe your issue" required></textarea><button class="btn primary">Create ticket</button></form></div><div class="card"><div class="eyebrow">Your tickets</div><div style="margin-top:10px">${tickets.length ? tickets.map(t => `<button class="btn" style="width:100%;text-align:left;margin-bottom:8px" data-ticket="${esc(t.id)}"><b>${esc(t.subject)}</b><br><span class="muted">${esc(t.status)}</span></button>`).join('') : '<div class="muted">No tickets yet.</div>'}</div>${activeTicket ? `<div class="note"><b>${esc(activeTicket.ticket?.subject || 'Ticket')}</b>${(activeTicket.messages || []).map((m) => `<p>${esc(m.message)}</p>`).join('')}<form id="replyForm" class="form"><textarea class="input" name="message" maxlength="10000" placeholder="Reply" required></textarea><button class="btn primary">Reply</button></form></div>` : ''}</div></div>`; }
+function notifications() { return `<div class="hero"><div><div class="eyebrow">Account alerts</div><div class="h1">Notifications</div></div><button class="btn primary" id="readAll">Mark all read</button></div><div class="card">${demo.notifications.length ? demo.notifications.map((n) => `<div class="note" style="margin-bottom:10px"><b>${esc(n.title || n.type || 'Notification')}</b><div>${esc(n.message || '')}</div><small class="muted">${esc(n.created_at || '')} ${n.read_at ? '• Read' : '• Unread'}</small></div>`).join('') : '<div class="muted">No notifications.</div>'}</div>`; }
+function profile() { return `<div class="hero"><div><div class="eyebrow">Account</div><div class="h1">Profile</div></div></div><div class="card"><form id="profileForm" class="form"><input class="input" name="name" value="${esc(user?.name || '')}" placeholder="Full name"><input class="input" name="mobile" value="${esc(user?.mobile || '')}" placeholder="Mobile"><input class="input" name="email" value="${esc(user?.email || '')}" placeholder="Email"><button class="btn primary">Save profile</button></form></div>`; }
+function bind() { document.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => { const symbol = b.dataset.buy; const input = document.querySelector('#orderForm input[name="symbol"]'); if (input)
+    input.value = symbol; document.querySelector('#orderForm')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); })); document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; render(); })); document.querySelectorAll('[data-cancel]').forEach(b => b.addEventListener('click', async () => { try {
+    await api(`/orders/${b.dataset.cancel}/cancel`, { method: 'POST' });
+    statusMsg = 'Order cancelled.';
+    await load();
+    render();
+}
+catch (e) {
+    statusMsg = `Cancel failed: ${e.message}`;
+    render();
+} })); document.querySelectorAll('[data-ticket]').forEach(b => b.addEventListener('click', async () => { try {
+    activeTicket = await api(`/support/${b.dataset.ticket}`);
+    render();
+}
+catch (e) {
+    statusMsg = `Ticket load failed: ${e.message}`;
+    render();
+} })); document.querySelector('#replyForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); try {
+    await api(`/support/${activeTicket.ticket.id}/reply`, { method: 'POST', body: JSON.stringify({ message: String(f.get('message') || '').trim() }) });
+    activeTicket = await api(`/support/${activeTicket.ticket.id}`);
+    statusMsg = 'Reply sent.';
+    render();
+}
+catch (e) {
+    statusMsg = `Reply failed: ${e.message}`;
+    render();
+} }); document.querySelector('#orderForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const qty = Number(f.get('qty')); const type = String(f.get('type')); const price = Number(f.get('price')); if (!Number.isFinite(qty) || qty <= 0 || qty > 10000000)
+    return statusMsg = 'Enter quantity between 1 and 10,000,000.'; if (['LIMIT'].includes(type) && (!Number.isFinite(price) || price <= 0))
+    return statusMsg = 'Limit price is required.'; const o = { instrumentId: String(f.get('symbol') || '').trim(), side: f.get('side'), orderType: type, quantity: qty, limitPrice: Number.isFinite(price) && price > 0 ? price : null, clientOrderId: 'WEB-' + crypto.randomUUID() }; try {
+    const d = await api('/orders', { method: 'POST', body: JSON.stringify(o) });
+    demo.orders.unshift(d.order || { ...o, status: 'RMS_PENDING', created_at: new Date().toISOString() });
+    statusMsg = 'Order accepted by RMS; execution is disabled until an authorised venue adapter is connected.';
+    render();
+}
+catch (e) {
+    statusMsg = API ? `Order failed: ${e.message}` : 'Demo mode is active; no real order was submitted.';
+    render();
+} }); document.querySelector('#fundForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const amount = Number(f.get('amount')); if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000)
+    return statusMsg = 'Enter an amount between ₹1 and ₹10,00,00,000.'; try {
+    await api('/funds/' + f.get('type'), { method: 'POST', body: JSON.stringify({ amount }) });
+    statusMsg = 'Finance request created.';
+    await load();
+    render();
+}
+catch (e) {
+    statusMsg = API ? `Finance request failed: ${e.message}` : 'Demo mode is active; no live finance request was sent.';
+    render();
+} }); document.querySelector('#kycForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const form = e.currentTarget; const fd = new FormData(form); const file = fd.get('file'); if (!file || file.size > 6000000)
+    return statusMsg = 'Choose a PDF/JPEG/PNG file up to 6 MB.'; try {
+    await api('/kyc/documents', { method: 'POST', body: fd });
+    statusMsg = 'Document uploaded.';
+    await load();
+    render();
+}
+catch (e) {
+    statusMsg = API ? `Upload failed: ${e.message}` : 'Demo mode is active; no live KYC upload was sent.';
+    render();
+} }); document.querySelector('#kycSubmit')?.addEventListener('submit', async (e) => { e.preventDefault(); const docs = demo.kyc?.documents || []; if (!docs.length)
+    return statusMsg = 'Upload at least one document before submitting.'; try {
+    await api('/kyc/submit', { method: 'POST', body: JSON.stringify({ documents: docs.map((d) => ({ documentType: d.document_type, documentRef: d.document_ref })) }) });
+    statusMsg = 'KYC submitted for review.';
+    await load();
+    render();
+}
+catch (e) {
+    statusMsg = API ? `KYC submission failed: ${e.message}` : 'Demo mode is active; no live KYC submission was sent.';
+    render();
+} }); document.querySelector('#supportForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); try {
+    await api('/support', { method: 'POST', body: JSON.stringify({ subject: String(f.get('subject') || '').trim(), message: String(f.get('message') || '').trim() }) });
+    statusMsg = 'Support ticket created.';
+    await load();
+    render();
+}
+catch (e) {
+    statusMsg = API ? `Support request failed: ${e.message}` : 'Demo mode is active; no live ticket was created.';
+    render();
+} }); document.querySelector('#readAll')?.addEventListener('click', async () => { try {
+    await api('/notifications/read-all', { method: 'POST' });
+    await load();
+    statusMsg = 'All notifications marked read.';
+    render();
+}
+catch (e) {
+    statusMsg = API ? `Notification update failed: ${e.message}` : 'Demo mode is active; no live notification update was sent.';
+    render();
+} }); document.querySelector('#profileForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); try {
+    const d = await api('/me/profile', { method: 'POST', body: JSON.stringify({ name: String(f.get('name') || ''), mobile: String(f.get('mobile') || ''), email: String(f.get('email') || '') }) });
+    user = { ...user, ...d.user };
+    localStorage.setItem('tredin_user', JSON.stringify(user));
+    statusMsg = 'Profile saved.';
+    render();
+}
+catch (e) {
+    statusMsg = API ? `Profile save failed: ${e.message}` : 'Demo mode is active; no live profile was saved.';
+    render();
+} }); document.querySelector('#logout')?.addEventListener('click', async () => { try {
+    if (API && token)
+        await api('/auth/logout', { method: 'POST' });
+}
+catch { } token = ''; refreshToken = ''; user = null; localStorage.removeItem('tredin_access'); localStorage.removeItem('tredin_refresh'); localStorage.removeItem('tredin_user'); if (stream) {
+    stream.close();
+    stream = null;
+} login(); }); }
+function render() { if (!user)
+    return login(); const pages = { overview, market, orders, positions, funds, kyc, support, notifications, profile }; layout(pages[tab]()); bind(); if (tab === 'market' && API) {
+    if (!quotes.length)
+        loadQuotes().then(() => { if (tab === 'market')
+            render(); });
+    if (!stream) {
+        stream = new EventSource(API + '/market/stream');
+        stream.onmessage = (ev) => { try {
+            const q = JSON.parse(ev.data);
+            const i = quotes.findIndex(x => x.symbol === q.symbol && x.exchange === q.exchange);
+            if (i >= 0)
+                quotes[i] = { ...quotes[i], ...q };
+            else
+                quotes.push(q);
+            if (tab === 'market')
+                render();
+        }
+        catch { } };
+        stream.onerror = () => { stream?.close(); stream = null; };
+    }
+}
+else if (stream) {
+    stream.close();
+    stream = null;
+} }
+(async () => { if (token && API) {
+    try {
+        await load();
+    }
+    catch {
+        token = '';
+        user = null;
+        localStorage.removeItem('tredin_access');
+        localStorage.removeItem('tredin_user');
+    }
+} if (!user && !API)
+    user = demo.user; render(); })();
