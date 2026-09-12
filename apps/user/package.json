@@ -1,0 +1,1 @@
+{"name":"@tredin/user","private":true,"version":"1.0.0","scripts":{"build":"tsc -p tsconfig.json && cp index.html style.css config.js dist/ && printf \"window.TREDIN_CONFIG={api:'%s'};\\n\" \"${TREDIN_API:-}\" > dist/config.js","typecheck":"tsc -p tsconfig.json --noEmit"},"devDependencies":{"typescript":"^5.9.2"}}
